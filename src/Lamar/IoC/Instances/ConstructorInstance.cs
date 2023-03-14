@@ -179,7 +179,7 @@ namespace Lamar.IoC.Instances
 
         private object quickResolve(Scope scope)
         {
-            var holdingScope = Lifetime == ServiceLifetime.Singleton ? scope.Root : scope;
+            var holdingScope = Lifetime == ServiceLifetime.Singleton ? getSingletonScope(scope) : scope;
             if (tryGetService(holdingScope, out var cached))
             {
                 return cached;
@@ -189,37 +189,24 @@ namespace Lamar.IoC.Instances
             {
                 new ErrorMessageResolver(this).Resolve(scope);
             }
-            
+
             var values = Arguments.Select(x => x.Instance.QuickResolve(holdingScope)).ToArray();
             var service = Activator.CreateInstance(ImplementationType, values);
 
             foreach (var setter in _setters)
             {
-                setter.ApplyQuickBuildProperties(service, scope);
+                setter.ApplyQuickBuildProperties(service, holdingScope);
             }
 
             switch (service)
             {
-                case IDisposable disposable when Lifetime == ServiceLifetime.Singleton:
-                    scope.Root.Disposables.Add(disposable);
-                    break;
                 case IDisposable disposable:
-                    scope.Disposables.Add(disposable);
+                    holdingScope.Disposables.Add(disposable);
                     break;
                 case IAsyncDisposable a:
-                {
                     var wrapper = new AsyncDisposableWrapper(a);
-                    if (Lifetime == ServiceLifetime.Singleton)
-                    {
-                        scope.Root.Disposables.Add(wrapper);
-                    }
-                    else
-                    {
-                        scope.Disposables.Add(wrapper);
-                    }
-
+                    holdingScope.Disposables.Add(wrapper);
                     break;
-                }
             }
 
             if (Lifetime != ServiceLifetime.Transient)
@@ -229,6 +216,36 @@ namespace Lamar.IoC.Instances
 
 
             return service;
+        }
+
+        private Scope getSingletonScope(Scope scope)
+        {
+            // Original behavior.  Ends up creating multiple Singleton instances when more than 2 nested container levels scopes.
+            //return scope.Root;
+
+            // ***********
+            // Resolution: Somehow need to get the highest level scope where all Singleton instances live.
+            // ***********
+
+            // Idea 1: This works but is janky.  It works because Root is set to this when there is no Root supplied in the constructor.  There would need to be X amount of .Root for however many nested levels are to be supported.
+            // return scope.Root.Root.Root.Root.Root;
+
+            // Idea 2: This works by traversing up through the Scope's Root property until it finds one where it matches itself (ie top level root), but janky and may be inefficient
+            int roots = 0;
+            var highestLevelScope = scope.Root;
+
+            while (highestLevelScope.Root != highestLevelScope)
+            {
+                roots++;
+                highestLevelScope = highestLevelScope.Root;
+
+                if (roots > 10) { break; } // Safety?  How many nested levels it'll traverse at max
+            }
+
+            return highestLevelScope;
+
+            // Idea 3: Is there a way to get the highest level Scope directly?
+            // The above ideas help show the issue and resolution, but there must be a better solution... not sure what it is yet.
         }
 
         public override Instance CloseType(Type serviceType, Type[] templateTypes)
