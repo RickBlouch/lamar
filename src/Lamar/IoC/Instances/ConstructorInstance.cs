@@ -187,7 +187,7 @@ namespace Lamar.IoC.Instances
 
             if (Constructor == null && ErrorMessages.Any())
             {
-                new ErrorMessageResolver(this).Resolve(scope);
+                new ErrorMessageResolver(this).Resolve(holdingScope);
             }
 
             var values = Arguments.Select(x => x.Instance.QuickResolve(holdingScope)).ToArray();
